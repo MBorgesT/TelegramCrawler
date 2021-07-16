@@ -4,9 +4,10 @@ from time import sleep
 from datetime import datetime
 from time import time
 import persistence
+import re
 
 
-CHANNEL_MINE_TIME = 3
+CHANNEL_MINE_TIME = 900
 
 
 class Miner:
@@ -36,49 +37,46 @@ class Miner:
 
 		info = []
 		next_data_mid_checker = None
-		while time() - clock < CHANNEL_MINE_TIME:
-			# message bubbles
-			bs = BeautifulSoup(self.driver.page_source, 'lxml')
-			bubbles = bs.find_all('div', {'class': 'bubble'})
+		try:
+			while time() - clock < CHANNEL_MINE_TIME:
+				# message bubbles
+				bs = BeautifulSoup(self.driver.page_source, 'lxml')
+				bubbles = bs.find_all('div', {'class': 'bubble'})
 
-			iterator = iter(bubbles)
-			next(iterator)
+				while len(bubbles) == 0:
+					bs = BeautifulSoup(self.driver.page_source, 'lxml')
+					bubbles = bs.find_all('div', {'class': 'bubble'})
 
-			# treat first bubble
-			bubble = next(iterator)
-			current_data_mid_checker = next_data_mid_checker
-			next_data_mid_checker = bubble['data-mid']
-			aux = self.get_bubble_info(bubble)
-			if aux:
-				info.append(aux)
+				iterator = iter(bubbles)
+				# treat first bubbles
+				bubble = next(iterator)
+				while not bubble.has_attr('data-mid'):
+					bubble = next(iterator)
 
-			flag = False
-			for bubble in iterator:
-				try:
-					if bubble['data-mid'] == current_data_mid_checker:
-						break
-				except:
-					pass
-				try:
-					aux = self.get_bubble_info(bubble)
-					if aux:
-						flag = True
-						info.append(aux)
-				except Exception as e:
-					print('data-mid:', bubble['data-mid'])
-					raise e
+				current_data_mid_checker = next_data_mid_checker
+				next_data_mid_checker = bubble['data-mid']
 
-			# no more messages
-			if not flag:
-				break
+				flag = True
+				while flag:
+					if bubble.has_attr('data-mid'):
+						if bubble['data-mid'] == current_data_mid_checker:
+							break
+						aux = self.get_bubble_info(bubble)
+						if aux:
+							info.append(aux)
+					try:
+						bubble = next(iterator)
+					except:
+						flag = False
 
-			self.driver.execute_script("arguments[0].scrollTop = 0", scroll_elem)
+				self.driver.execute_script("arguments[0].scrollTop = 0", scroll_elem)
+		except KeyboardInterrupt:
+			pass
 
 		print('Len: ', len(info))
 		print('- - - - - - - - - - -')
 
-		info_dict = dict(zip(range(len(info)), info))
-		channel_info['messages'] = info_dict
+		channel_info['messages'] = info
 
 		return channel_info
 
@@ -86,17 +84,18 @@ class Miner:
 		content_elem = bubble.find('div', {'class': 'bubble-content'})
 
 		header_elem = content_elem.find('div', {'class': 'name'})
-		if not header_elem:
-			return
 		forwarded_from = None
-		if header_elem.find('span', {'class': 'i18n'}):
+		if header_elem and header_elem.find('span', {'class': 'i18n'}):
 			try:
 				forwarded_from = header_elem.find('span', {'class': 'peer-title'}).text
 			except:
 				return None
 
 		message_elem = content_elem.find('div', {'class': 'message'})
-		message = message_elem.text[:-10]
+		if not message_elem:
+			return None
+		message = message_elem.text
+		#message = self.treat_message_text(message_elem.text)
 		link_url = message_elem.find('a')['href'] if message_elem.find('a') else None
 
 		time_text = message_elem.find('span', {'class': 'time tgico'})['title'].replace('\n', '')
@@ -146,7 +145,7 @@ class Miner:
 
 		second_part = bs.find('div', {'class': 'sidebar-left-section no-delimiter'})
 		username = second_part.find('div', {'class': 'row-title tgico tgico-username'}).text
-		bio = second_part.find('div', {'class': 'row-title tgico tgico-info pre-wrap'})
+		bio = second_part.find('div', {'class': 'row-title tgico tgico-info pre-wrap'}).text
 
 		return {
 			'name': name,
@@ -155,20 +154,34 @@ class Miner:
 			'bio': bio
 		}
 
-	def mine(self):
+	def treat_message_text(self, message):
+		regrex_pattern = re.compile(pattern="["
+			u"\U0001F600-\U0001F64F"  # emoticons
+			u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+			u"\U0001F680-\U0001F6FF"  # transport & map symbols
+			u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+			"]+", flags=re.UNICODE)
+
+		return regrex_pattern.sub(r'', message)
+
+	def mine_all(self):
 		self.driver.get('https://web.telegram.org/')
 		sleep(5)
 
 		bs = BeautifulSoup(self.driver.page_source, 'lxml')
 		chatlist_elements = bs.find('ul', {'class': 'chatlist'}).findChildren('li', recursive=False)
-		channel_infos = []
-		i = 0
 		for channel in chatlist_elements:
 			self.driver.find_element_by_css_selector('li[data-peer-id="' + channel['data-peer-id'] + '"').click()
 			aux = self.mine_channel()
-			channel_infos.append(aux)
-			i += 1
-			if i == 3:
-				break
+			persistence.persist_one(aux)
 
-		persistence.persist(dict(zip(range(len(channel_infos)), channel_infos)))
+		self.driver.close()
+
+	def mine_selected(self):
+		self.driver.get('https://web.telegram.org/')
+		input('Select the channel and press ENTER')
+		print('Mining...\n')
+
+		aux = self.mine_channel()
+		persistence.persist_one(aux)
+		self.driver.close()
