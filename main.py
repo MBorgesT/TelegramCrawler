@@ -11,4 +11,4 @@ if __name__ == '__main__':
 	elif sys.argv[1] == 'one':
 		miner.mine_selected()
 	else:
-		raise Exception('Invalid argument:', sys.argv[0])
+		raise Exception('Invalid argument:', sys.argv[1])

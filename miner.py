@@ -24,6 +24,10 @@ class Miner:
 		channel_info = self.get_channel_info()
 		print(channel_info['name'])
 
+		channel_info['messages'] = []
+		channel_info['messages_len'] = 0
+		channel_id = persistence.persist_channel(channel_info).inserted_id
+
 		# go to bottom
 		try:
 			self.driver.find_element_by_xpath('//*[@id="column-center"]/div/div/div[4]/div/button[1]').click()
@@ -33,12 +37,12 @@ class Miner:
 
 		# scroll
 		scroll_elem = self.driver.find_element_by_xpath('//*[@id="column-center"]/div/div/div[3]/div')
-		clock = time()
 
-		info = []
 		next_data_mid_checker = None
 		try:
-			while time() - clock < CHANNEL_MINE_TIME:
+			# while time() - clock < CHANNEL_MINE_TIME:
+			while True:
+				info = []
 				# message bubbles
 				bs = BeautifulSoup(self.driver.page_source, 'lxml')
 				bubbles = bs.find_all('div', {'class': 'bubble'})
@@ -69,16 +73,13 @@ class Miner:
 					except:
 						flag = False
 
+				persistence.add_messages_to_channel(channel_id, info)
 				self.driver.execute_script("arguments[0].scrollTop = 0", scroll_elem)
 		except KeyboardInterrupt:
 			pass
 
 		print('Len: ', len(info))
 		print('- - - - - - - - - - -')
-
-		channel_info['messages'] = info
-
-		return channel_info
 
 	def get_bubble_info(self, bubble):
 		content_elem = bubble.find('div', {'class': 'bubble-content'})
@@ -182,6 +183,6 @@ class Miner:
 		input('Select the channel and press ENTER')
 		print('Mining...\n')
 
-		aux = self.mine_channel()
-		persistence.persist_one(aux)
+		self.mine_channel()
+
 		self.driver.close()
